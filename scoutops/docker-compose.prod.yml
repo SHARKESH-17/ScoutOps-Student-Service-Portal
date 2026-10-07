@@ -1,0 +1,57 @@
+version: '3.9'
+
+services:
+  scoutops-app:
+    image: scoutops:${SCOUTOPS_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scoutops-app
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: scoutops
+      DB_USER: ${DB_USER:-scoutops_user}
+      DB_PASSWORD: ${DB_PASSWORD:-change_me}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 25s
+    ports:
+      - "3000:3000"
+    networks:
+      - scoutops-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME:-scoutops}
+      POSTGRES_USER: ${DB_USER:-scoutops_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me}
+    volumes:
+      - scoutops_postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-scoutops_user} -d ${DB_NAME:-scoutops}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - scoutops-network
+
+volumes:
+  scoutops_postgres_data:
+
+networks:
+  scoutops-network:
+    driver: bridge
