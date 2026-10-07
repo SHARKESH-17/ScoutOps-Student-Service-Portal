@@ -1,0 +1,22 @@
+# Node.js dependencies and runtime files
+node_modules/
+npm-debug.log*
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Terraform state and local provider data
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Local deployment artifacts
+scoutops/backups/
+scoutops/.scoutops-previous-tag

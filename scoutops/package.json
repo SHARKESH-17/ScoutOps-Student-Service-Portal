@@ -1,0 +1,42 @@
+{
+  "name": "scoutops",
+  "version": "1.0.0",
+  "description": "ScoutOps campus issue and maintenance management platform",
+  "main": "src/server.js",
+  "private": true,
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "scripts": {
+    "start": "npm run migrate && npm run user:bootstrap && node src/server.js",
+    "dev": "npm run migrate && node --watch src/server.js",
+    "test": "jest --runInBand tests/app.test.js",
+    "test:integration": "jest --runInBand tests/integration.test.js",
+    "migrate": "node scripts/run-migrations.js",
+    "migrate:status": "node scripts/run-migrations.js --status",
+    "user:bootstrap": "node scripts/bootstrap-admin.js"
+  },
+  "license": "MIT",
+  "keywords": [
+    "scoutops",
+    "campus",
+    "issues",
+    "maintenance",
+    "express",
+    "postgres",
+    "prometheus"
+  ],
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.13.1",
+    "prom-client": "^15.1.3"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  }
+}
