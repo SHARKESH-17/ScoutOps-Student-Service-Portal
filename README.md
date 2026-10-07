@@ -29,6 +29,8 @@ The system provides a professional web interface, validates issue payloads, stor
 ## Architecture
 [![Architecture diagram of sharkesh-17/scoutops-student-service-portal](https://gitdiagram.com/sharkesh-17/scoutops-student-service-portal/diagram.png)](https://gitdiagram.com/sharkesh-17/scoutops-student-service-portal?utm_source=readme&utm_medium=picture)
 
+[![Architecture diagram](https://gitdiagram.com/diagram-badge.svg)](https://gitdiagram.com/sharkesh-17/scoutops-student-service-portal?utm_source=readme&utm_medium=badge)
+
 ### Application Architecture
 
 ```text
