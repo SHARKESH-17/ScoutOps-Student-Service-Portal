@@ -337,6 +337,8 @@
         color: #ffd0d0;
       }
 
+      [hidden] { display: none !important; }
+
       .health-row {
         display: flex;
         justify-content: space-between;
@@ -369,10 +371,32 @@
           <small>Find. Track. Resolve.</small>
         </div>
       </div>
-      <div class="status-pill"><span class="dot"></span>Operations Healthy</div>
+      <div class="brand">
+        <div class="status-pill"><span class="dot"></span>Operations Healthy</div>
+        <button class="secondary small" id="logout-btn" type="button" hidden>Sign out</button>
+      </div>
     </header>
 
-    <main class="layout">
+    <section class="layout" id="login-panel">
+      <div class="card" style="max-width: 440px; margin: 3rem auto">
+        <h2>Sign in to ScoutOps</h2>
+        <p>Use your campus operations account to view or manage reported issues.</p>
+        <form id="login-form">
+          <div>
+            <label for="login-username">Username</label>
+            <input id="login-username" name="username" autocomplete="username" required />
+          </div>
+          <div>
+            <label for="login-password">Password</label>
+            <input id="login-password" name="password" type="password" autocomplete="current-password" required />
+          </div>
+          <button class="primary" type="submit">Sign in</button>
+        </form>
+        <div class="alerts" id="login-alerts"></div>
+      </div>
+    </section>
+
+    <main class="layout" id="app-panel" hidden>
       <section class="dashboard" id="dashboard"></section>
 
       <section class="content-grid">
@@ -429,17 +453,6 @@
               </div>
             </div>
 
-            <div>
-              <label for="status">Status</label>
-              <select id="status" name="status">
-                <option value="OPEN">Open</option>
-                <option value="ASSIGNED">Assigned</option>
-                <option value="IN_PROGRESS">In Progress</option>
-                <option value="RESOLVED">Resolved</option>
-                <option value="CLOSED">Closed</option>
-              </select>
-            </div>
-
             <div class="issue-actions">
               <button type="submit" class="primary">Submit Issue</button>
               <button type="button" class="secondary small" id="reset-form">Reset</button>
@@ -477,10 +490,37 @@
       const alerts = document.getElementById('alerts');
       const issueSearch = document.getElementById('issue-search');
       const statusFilter = document.getElementById('status-filter');
+      const loginPanel = document.getElementById('login-panel');
+      const appPanel = document.getElementById('app-panel');
+      const loginForm = document.getElementById('login-form');
+      const loginAlerts = document.getElementById('login-alerts');
+      const logoutButton = document.getElementById('logout-btn');
+      let currentUser = null;
+      let staffUsers = [];
       let allIssues = [];
 
+      const escapeHTML = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      })[character]);
+
+      const apiFetch = (url, options = {}) => {
+        const token = sessionStorage.getItem('scoutops-token');
+        const headers = new Headers(options.headers || {});
+        if (token) headers.set('Authorization', `Bearer ${token}`);
+        return fetch(url, { ...options, headers });
+      };
+
+      const showAuthenticatedApp = (user) => {
+        currentUser = user;
+        loginPanel.hidden = true;
+        appPanel.hidden = false;
+        logoutButton.hidden = false;
+        loadIssues();
+        if (user.role === 'staff' || user.role === 'admin') loadStaffUsers();
+      };
+
       const setAlert = (message, type = 'success') => {
-        alerts.innerHTML = `<div class="alert ${type}">${message}</div>`;
+        alerts.innerHTML = `<div class="alert ${type}">${escapeHTML(message)}</div>`;
       };
 
       const badgeClass = (priority) => {
@@ -541,32 +581,42 @@
           <article class="issue-item">
             <div class="issue-header">
               <div>
-                <div class="issue-title">${issue.title}</div>
+                <div class="issue-title">${escapeHTML(issue.title)}</div>
                 <div class="meta">
-                  <span class="badge ${badgeClass(issue.priority)}">${issue.priority}</span>
-                  <span class="badge ${statusClass(issue.status)}">${issue.status}</span>
-                  <span class="badge">${issue.category}</span>
+                  <span class="badge ${badgeClass(issue.priority)}">${escapeHTML(issue.priority)}</span>
+                  <span class="badge ${statusClass(issue.status)}">${escapeHTML(issue.status)}</span>
+                  <span class="badge">${escapeHTML(issue.category)}</span>
                 </div>
               </div>
-              <span class="badge">#${issue.id}</span>
+              <span class="badge">#${escapeHTML(issue.id)}</span>
             </div>
-            <p>${issue.description}</p>
+            <p>${escapeHTML(issue.description)}</p>
             <div class="meta">
-              <span class="badge">Location: ${issue.location}</span>
-              <span class="badge">Reporter: ${issue.reporter_name}</span>
-              <span class="badge">Created: ${new Date(issue.created_at).toLocaleDateString()}</span>
+              <span class="badge">Location: ${escapeHTML(issue.location)}</span>
+              <span class="badge">Reporter: ${escapeHTML(issue.reporter_name)}</span>
+              <span class="badge">Assigned: ${escapeHTML(issue.assigned_to_username || 'Unassigned')}</span>
+              <span class="badge">Created: ${escapeHTML(new Date(issue.created_at).toLocaleDateString())}</span>
             </div>
             <div class="issue-actions">
-              <button class="secondary small" type="button" data-action="status" data-id="${issue.id}">Advance Status</button>
-              <button class="secondary small" type="button" data-action="delete" data-id="${issue.id}">Delete</button>
+              ${(currentUser.role === 'staff' || currentUser.role === 'admin') ? `
+                <button class="secondary small" type="button" data-action="status" data-id="${escapeHTML(issue.id)}">Advance Status</button>
+                <button class="secondary small" type="button" data-action="history" data-id="${escapeHTML(issue.id)}">History</button>
+                <select aria-label="Assign issue #${escapeHTML(issue.id)}" data-assignee-for="${escapeHTML(issue.id)}">
+                  <option value="">Unassigned</option>
+                  ${staffUsers.map((user) => `<option value="${escapeHTML(user.id)}" ${Number(issue.assigned_to) === Number(user.id) ? 'selected' : ''}>${escapeHTML(user.username)}</option>`).join('')}
+                </select>
+                <button class="secondary small" type="button" data-action="assign" data-id="${escapeHTML(issue.id)}">Assign</button>
+              ` : ''}
+              ${currentUser.role === 'admin' ? `<button class="secondary small" type="button" data-action="delete" data-id="${escapeHTML(issue.id)}">Delete</button>` : ''}
             </div>
+            <div class="issue-history" data-history-for="${escapeHTML(issue.id)}"></div>
           </article>
         `).join('');
       };
 
       const loadIssues = async () => {
         try {
-          const response = await fetch('/api/issues');
+          const response = await apiFetch('/api/issues');
           if (!response.ok) {
             throw new Error('Unable to load issues');
           }
@@ -598,12 +648,52 @@
         }
       };
 
+      loginForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        loginAlerts.innerHTML = '';
+        const credentials = Object.fromEntries(new FormData(loginForm).entries());
+        try {
+          const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(credentials),
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.error || 'Sign in failed.');
+          sessionStorage.setItem('scoutops-token', body.token);
+          showAuthenticatedApp(body.user);
+        } catch (error) {
+          loginAlerts.innerHTML = `<div class="alert error">${escapeHTML(error.message || 'Sign in failed.')}</div>`;
+        }
+      });
+
+      logoutButton.addEventListener('click', () => {
+        sessionStorage.removeItem('scoutops-token');
+        currentUser = null;
+        appPanel.hidden = true;
+        loginPanel.hidden = false;
+        logoutButton.hidden = true;
+        issueList.innerHTML = '';
+        dashboard.innerHTML = '';
+      });
+
+      const loadStaffUsers = async () => {
+        try {
+          const response = await apiFetch('/api/users');
+          if (!response.ok) throw new Error('Unable to load staff directory.');
+          staffUsers = await response.json();
+          applyFilters();
+        } catch (error) {
+          setAlert(error.message, 'error');
+        }
+      };
+
       issueForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         const payload = Object.fromEntries(new FormData(issueForm).entries());
 
         try {
-          const response = await fetch('/api/issues', {
+          const response = await apiFetch('/api/issues', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -631,7 +721,7 @@
 
         try {
           if (action === 'delete') {
-            const response = await fetch(`/api/issues/${id}`, { method: 'DELETE' });
+            const response = await apiFetch(`/api/issues/${id}`, { method: 'DELETE' });
             const body = await response.json();
             if (!response.ok) {
               throw new Error(body.error || 'Delete failed');
@@ -640,7 +730,7 @@
           }
 
           if (action === 'status') {
-            const issueResponse = await fetch(`/api/issues/${id}`);
+            const issueResponse = await apiFetch(`/api/issues/${id}`);
             const issue = await issueResponse.json();
             const nextStatus = issue.status === 'OPEN'
               ? 'ASSIGNED'
@@ -650,7 +740,7 @@
                   ? 'RESOLVED'
                   : 'CLOSED';
 
-            const patchResponse = await fetch(`/api/issues/${id}/status`, {
+            const patchResponse = await apiFetch(`/api/issues/${id}/status`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ status: nextStatus }),
@@ -662,7 +752,29 @@
             setAlert(`Issue status updated to ${patchBody.status}.`, 'success');
           }
 
-          await loadIssues();
+          if (action === 'assign') {
+            const select = issueList.querySelector(`[data-assignee-for="${CSS.escape(id)}"]`);
+            const response = await apiFetch(`/api/issues/${id}/assignment`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ assigned_to: select.value || null }),
+            });
+            const body = await response.json();
+            if (!response.ok) throw new Error(body.error || 'Assignment failed.');
+            setAlert('Issue assignment updated.', 'success');
+          }
+
+          if (action === 'history') {
+            const response = await apiFetch(`/api/issues/${id}/history`);
+            const history = await response.json();
+            if (!response.ok) throw new Error(history.error || 'Unable to load issue history.');
+            const target = issueList.querySelector(`[data-history-for="${CSS.escape(id)}"]`);
+            target.innerHTML = history.length
+              ? `<p>${history.map((entry) => `${escapeHTML(entry.old_status)} → ${escapeHTML(entry.new_status)} by ${escapeHTML(entry.changed_by || 'system')} (${escapeHTML(new Date(entry.changed_at).toLocaleString())})`).join('<br>')}</p>`
+              : '<p>No status changes recorded.</p>';
+          }
+
+          if (action !== 'history') await loadIssues();
         } catch (error) {
           setAlert(error.message || 'Issue action failed.', 'error');
         }
@@ -678,8 +790,16 @@
 
       document.getElementById('reset-form').addEventListener('click', () => issueForm.reset());
 
-      loadIssues();
       refreshHealth();
+      const savedToken = sessionStorage.getItem('scoutops-token');
+      if (savedToken) {
+        apiFetch('/api/auth/me').then((response) => {
+          if (!response.ok) throw new Error('Session expired.');
+          return response.json();
+        }).then(showAuthenticatedApp).catch(() => {
+          sessionStorage.removeItem('scoutops-token');
+        });
+      }
     </script>
   </body>
 </html>

@@ -8,11 +8,13 @@
     "node": ">=18.18.0"
   },
   "scripts": {
-    "start": "npm run migrate && node src/server.js",
+    "start": "npm run migrate && npm run user:bootstrap && node src/server.js",
     "dev": "npm run migrate && node --watch src/server.js",
-    "test": "jest --runInBand",
+    "test": "jest --runInBand tests/app.test.js",
+    "test:integration": "jest --runInBand tests/integration.test.js",
     "migrate": "node scripts/run-migrations.js",
-    "migrate:status": "node scripts/run-migrations.js --status"
+    "migrate:status": "node scripts/run-migrations.js --status",
+    "user:bootstrap": "node scripts/bootstrap-admin.js"
   },
   "license": "MIT",
   "keywords": [
@@ -25,8 +27,11 @@
     "prometheus"
   ],
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^7.5.1",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.13.1",
     "prom-client": "^15.1.3"
   },

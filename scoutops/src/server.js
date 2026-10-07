@@ -4,6 +4,13 @@ const db = require('./db');
 
 dotenv.config();
 
+for (const name of ['JWT_SECRET', 'METRICS_TOKEN']) {
+  if (!process.env[name] || process.env[name].length < 32) {
+    console.error(`${name} must be configured with at least 32 characters.`);
+    process.exit(1);
+  }
+}
+
 const PORT = Number(process.env.PORT || 3000);
 
 const server = app.listen(PORT, () => {

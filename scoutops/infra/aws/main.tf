@@ -2,6 +2,10 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+data "aws_ssm_parameter" "amazon_linux_2023_ami" {
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+}
+
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
@@ -97,14 +101,6 @@ resource "aws_security_group" "app" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   egress {
     description = "All outbound"
     from_port   = 0
@@ -167,13 +163,15 @@ resource "aws_db_instance" "postgres" {
   engine_version         = "16.3"
   instance_class         = var.db_instance_class
   username               = var.db_username
-  password               = var.db_password
+  manage_master_user_password = true
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.db.id]
   publicly_accessible    = false
-  skip_final_snapshot    = true
+  storage_encrypted      = true
+  skip_final_snapshot    = false
+  final_snapshot_identifier = "${var.project_name}-${var.environment}-final"
   backup_retention_period = 7
-  deletion_protection    = false
+  deletion_protection    = true
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-db"
@@ -202,38 +200,94 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+resource "aws_iam_role_policy" "read_runtime_secrets" {
+  name = "${var.project_name}-${var.environment}-read-runtime-secrets"
+  role = aws_iam_role.ec2_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = concat([aws_db_instance.postgres.master_user_secret[0].secret_arn], var.runtime_secret_arns)
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "ec2_profile" {
   name = "${var.project_name}-${var.environment}-instance-profile"
   role = aws_iam_role.ec2_role.name
 }
 
 resource "aws_instance" "app" {
-  ami                    = "ami-0c02fb55956c7d662"
+  ami                    = data.aws_ssm_parameter.amazon_linux_2023_ami.value
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.public[0].id
   vpc_security_group_ids = [aws_security_group.app.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+  depends_on = [
+    aws_iam_role_policy_attachment.ssm_core,
+    aws_iam_role_policy.read_runtime_secrets,
+  ]
 
   user_data = <<-EOF
               #!/bin/bash
-              set -eux
-              yum update -y
-              yum install -y docker git
+              set -eu
+              umask 077
+              dnf update -y
+              dnf install -y docker docker-compose-plugin git awscli python3
               systemctl enable docker
               systemctl start docker
-              usermod -a -G docker ec2-user
               mkdir -p /opt/scoutops
               cd /opt/scoutops
-              git clone https://github.com/SHARKESH-17/ScoutOps-Student-Service-Portal.git .
-              docker build -t scoutops:latest /opt/scoutops/scoutops
-              docker run -d --name scoutops -p 80:3000 \
-                -e DB_HOST=${aws_db_instance.postgres.address} \
-                -e DB_PORT=5432 \
-                -e DB_NAME=${var.db_name} \
-                -e DB_USER=${var.db_username} \
-                -e DB_PASSWORD=${var.db_password} \
-                -e NODE_ENV=production \
-                scoutops:latest
+              git clone --depth 1 https://github.com/SHARKESH-17/ScoutOps-Student-Service-Portal.git .
+              DB_SECRET=$(aws secretsmanager get-secret-value --secret-id ${aws_db_instance.postgres.master_user_secret[0].secret_arn} --query SecretString --output text --region ${var.aws_region})
+              DB_USER=$(python3 -c "import json,sys; print(json.load(sys.stdin)['username'])" <<< "$DB_SECRET")
+              DB_PASSWORD=$(python3 -c "import json,sys; print(json.load(sys.stdin)['password'])" <<< "$DB_SECRET")
+              JWT_SECRET=$(aws secretsmanager get-secret-value --secret-id ${var.runtime_secret_arns[0]} --query SecretString --output text --region ${var.aws_region})
+              ADMIN_SECRET=$(aws secretsmanager get-secret-value --secret-id ${var.runtime_secret_arns[1]} --query SecretString --output text --region ${var.aws_region})
+              ADMIN_USERNAME=$(python3 -c "import json,sys; print(json.load(sys.stdin)['username'])" <<< "$ADMIN_SECRET")
+              ADMIN_PASSWORD=$(python3 -c "import json,sys; print(json.load(sys.stdin)['password'])" <<< "$ADMIN_SECRET")
+              METRICS_TOKEN=$(aws secretsmanager get-secret-value --secret-id ${var.runtime_secret_arns[2]} --query SecretString --output text --region ${var.aws_region})
+              TLS_SECRET=$(aws secretsmanager get-secret-value --secret-id ${var.runtime_secret_arns[3]} --query SecretString --output text --region ${var.aws_region})
+              mkdir -p /opt/scoutops/scoutops/tls
+              python3 -c "import json,sys; s=json.load(sys.stdin); open('/opt/scoutops/scoutops/tls/fullchain.pem','w').write(s['fullchain']); open('/opt/scoutops/scoutops/tls/privkey.pem','w').write(s['privkey'])" <<< "$TLS_SECRET"
+              chmod 600 /opt/scoutops/scoutops/tls/privkey.pem
+              export DB_HOST=${aws_db_instance.postgres.address}
+              export DB_PORT=5432
+              export DB_NAME=${var.db_name}
+              export DB_USER DB_PASSWORD JWT_SECRET ADMIN_USERNAME ADMIN_PASSWORD METRICS_TOKEN
+              export SCOUTOPS_IMAGE_REPOSITORY=${var.image_repository}
+              export SCOUTOPS_IMAGE_TAG=${var.image_tag}
+              export TLS_CERT_DIR=/opt/scoutops/scoutops/tls
+              export TLS_HOSTNAME=${var.tls_hostname}
+              python3 - <<'PY'
+              import os
+              import shlex
+              values = {
+                  "NODE_ENV": "production",
+                  "DB_HOST": os.environ["DB_HOST"],
+                  "DB_PORT": os.environ["DB_PORT"],
+                  "DB_NAME": os.environ["DB_NAME"],
+                  "DB_USER": os.environ["DB_USER"],
+                  "DB_PASSWORD": os.environ["DB_PASSWORD"],
+                  "JWT_SECRET": os.environ["JWT_SECRET"],
+                  "ADMIN_USERNAME": os.environ["ADMIN_USERNAME"],
+                  "ADMIN_PASSWORD": os.environ["ADMIN_PASSWORD"],
+                  "METRICS_TOKEN": os.environ["METRICS_TOKEN"],
+                  "SCOUTOPS_IMAGE_REPOSITORY": os.environ["SCOUTOPS_IMAGE_REPOSITORY"],
+                  "SCOUTOPS_IMAGE_TAG": os.environ["SCOUTOPS_IMAGE_TAG"],
+                  "TLS_CERT_DIR": os.environ["TLS_CERT_DIR"],
+                  "TLS_HOSTNAME": os.environ["TLS_HOSTNAME"],
+                  "TRUST_PROXY": "true",
+              }
+              with open("/opt/scoutops/scoutops/.env", "w", encoding="utf-8") as env_file:
+                  for key, value in values.items():
+                      env_file.write(f"{key}={shlex.quote(value)}\n")
+              PY
+              chmod 600 /opt/scoutops/scoutops/.env
+              cd /opt/scoutops/scoutops
+              docker compose -f docker-compose.prod.yml up -d
               EOF
 
   tags = {
@@ -244,8 +298,13 @@ resource "aws_instance" "app" {
 }
 
 output "app_url" {
-  description = "Public URL of the app instance."
-  value       = "http://${aws_instance.app.public_ip}"
+  description = "HTTPS URL configured for the ScoutOps deployment."
+  value       = "https://${var.tls_hostname}"
+}
+
+output "app_public_ip" {
+  description = "Public IPv4 address to point the TLS hostname at."
+  value       = aws_instance.app.public_ip
 }
 
 output "database_endpoint" {

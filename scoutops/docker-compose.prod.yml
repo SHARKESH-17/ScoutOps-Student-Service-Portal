@@ -1,57 +1,76 @@
-version: '3.9'
-
 services:
   scoutops-app:
-    image: scoutops:${SCOUTOPS_IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: scoutops-app
-    restart: always
+    image: ${SCOUTOPS_IMAGE_REPOSITORY:?Set SCOUTOPS_IMAGE_REPOSITORY}:${SCOUTOPS_IMAGE_TAG:?Set an immutable SCOUTOPS_IMAGE_TAG}
+    restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: 3000
-      DB_HOST: postgres
+      DB_HOST: ${DB_HOST:-postgres}
       DB_PORT: 5432
-      DB_NAME: scoutops
-      DB_USER: ${DB_USER:-scoutops_user}
-      DB_PASSWORD: ${DB_PASSWORD:-change_me}
+      DB_NAME: ${DB_NAME:?Set DB_NAME}
+      DB_USER: ${DB_USER:?Set DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD}
+      METRICS_TOKEN: ${METRICS_TOKEN:?Set METRICS_TOKEN}
+      TRUST_PROXY: "true"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 20s
       timeout: 5s
       retries: 6
-      start_period: 25s
-    ports:
-      - "3000:3000"
+      start_period: 30s
     networks:
-      - scoutops-network
+      - app-network
+      - data-network
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      scoutops-app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${TLS_CERT_DIR:?Set TLS_CERT_DIR to the directory containing fullchain.pem and privkey.pem}:/etc/nginx/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate -q --spider https://127.0.0.1/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
 
   postgres:
     image: postgres:16-alpine
-    container_name: postgres
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_NAME:-scoutops}
-      POSTGRES_USER: ${DB_USER:-scoutops_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me}
+      POSTGRES_DB: ${DB_NAME:?Set DB_NAME}
+      POSTGRES_USER: ${DB_USER:?Set DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
     volumes:
       - scoutops_postgres_data:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-scoutops_user} -d ${DB_NAME:-scoutops}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 12
     networks:
-      - scoutops-network
+      - data-network
 
 volumes:
   scoutops_postgres_data:
 
 networks:
-  scoutops-network:
-    driver: bridge
+  app-network:
+    name: scoutops-app-network
+  data-network:
+    name: scoutops-data-network
+    internal: true

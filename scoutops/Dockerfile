@@ -1,5 +1,8 @@
 FROM node:20-alpine
 
+ARG VCS_REF
+LABEL org.opencontainers.image.revision=$VCS_REF
+
 WORKDIR /app
 
 COPY package*.json ./
@@ -10,12 +13,7 @@ COPY public ./public
 COPY db ./db
 
 ENV NODE_ENV=production \
-    PORT=3000 \
-    DB_HOST=postgres \
-    DB_PORT=5432 \
-    DB_NAME=scoutops \
-    DB_USER=scoutops_user \
-    DB_PASSWORD=change_me
+    PORT=3000
 
 EXPOSE 3000
 
@@ -24,4 +22,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
 
 USER node
 
-CMD ["sh", "-c", "npm run migrate && node src/server.js"]
+CMD ["npm", "start"]

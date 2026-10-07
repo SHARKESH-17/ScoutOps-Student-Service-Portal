@@ -59,9 +59,33 @@ variable "db_username" {
   sensitive   = true
 }
 
-variable "db_password" {
-  description = "Master password for PostgreSQL."
+variable "image_repository" {
+  description = "Published ScoutOps container image repository."
   type        = string
-  default     = "ChangeMe123!"
+}
+
+variable "image_tag" {
+  description = "Immutable ScoutOps image tag to deploy."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+-[0-9a-f]{12}$", var.image_tag))
+    error_message = "Use the Jenkins immutable <build-number>-<12-character-git-sha> image tag."
+  }
+}
+
+variable "tls_hostname" {
+  description = "DNS hostname covered by the TLS certificate."
+  type        = string
+}
+
+variable "runtime_secret_arns" {
+  description = "Secret ARNs in this order: JWT secret, bootstrap admin JSON, metrics token, and TLS certificate JSON."
+  type        = list(string)
   sensitive   = true
+
+  validation {
+    condition     = length(var.runtime_secret_arns) == 4
+    error_message = "Provide exactly four runtime secret ARNs: JWT, admin, metrics, and TLS."
+  }
 }

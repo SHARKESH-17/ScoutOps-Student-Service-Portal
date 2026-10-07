@@ -1,13 +1,10 @@
 # AWS infrastructure (Terraform)
 
-This folder contains a minimal Terraform deployment for the ScoutOps app in a VPC with:
-
-- 1 public subnet and 1 private subnet pair
-- 1 EC2 instance to run the application
-- 1 RDS PostgreSQL instance in the private subnet
-- Security groups for app and database tiers
+This template provisions a VPC, an EC2 app host, and private encrypted RDS PostgreSQL. The app host uses Systems Manager instead of SSH ingress and reads only the configured runtime Secrets Manager secrets plus the RDS-managed master secret. Database traffic is restricted to the app security group.
 
 ## Usage
+
+Supply `image_repository`, immutable `image_tag`, `tls_hostname`, and `runtime_secret_arns` in `terraform.tfvars` or through `TF_VAR_*` environment variables. `runtime_secret_arns` must contain four secret ARNs in this order: JWT secret, bootstrap admin JSON (`username` and `password`), metrics token, and TLS certificate JSON (`fullchain` and `privkey`). The image must be publicly pullable by the EC2 host.
 
 ```bash
 cd infra/aws
@@ -16,13 +13,4 @@ terraform plan
 terraform apply
 ```
 
-## Notes
-
-- Replace the default database password before production use.
-- This is a base template for demonstration and iteration; production hardening should add:
-  - ALB + target groups
-  - TLS via ACM + Route53
-  - IAM least-privilege policies
-  - EBS snapshots / backups
-  - Secrets Manager for DB credentials
-  - CloudWatch alarms and log aggregation
+Never commit `terraform.tfvars`, state files, or secret values. Use a remote encrypted state backend and review resource costs, AMI package availability, and recovery requirements before applying. This template has not been tested against a live AWS account.
