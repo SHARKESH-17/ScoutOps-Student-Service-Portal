@@ -1,0 +1,29 @@
+groups:
+  - name: scoutops-alerts
+    rules:
+      - alert: ScoutOpsApplicationDown
+        expr: up{job="scoutops"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ScoutOps application is unavailable"
+          description: "Prometheus has not received metrics from ScoutOps for more than 1 minute."
+
+      - alert: ScoutOpsHighErrorRate
+        expr: rate(scoutops_http_requests_total{status_code=~"5.."}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ScoutOps has a high HTTP error rate"
+          description: "More than 10% of requests to ScoutOps are returning 5xx responses."
+
+      - alert: ScoutOpsHighLatency
+        expr: histogram_quantile(0.95, sum(rate(scoutops_http_request_duration_seconds_bucket[5m])) by (le)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ScoutOps latency is too high"
+          description: "P95 request latency exceeded 2 seconds for the last 5 minutes."
